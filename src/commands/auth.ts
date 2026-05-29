@@ -7,23 +7,28 @@ export function registerAuth(program: Command): void {
 
   auth
     .command("login")
-    .description("Authenticate with an access token")
-    .requiredOption("--token <token>", "Access token from SendMaxx settings")
-    .option("--url <url>", "Base URL of your SendMaxx instance", "http://localhost:3000")
-    .action(async (opts: { token: string; url: string }) => {
-      // Validate the token
+    .description("Validate the root --token / --url and save them to ~/.sendmaxx/config.json")
+    .action(async () => {
+      const root = program.opts();
+      const token = (root.token as string | undefined)?.trim();
+      const url = ((root.url as string | undefined) ?? "http://localhost:3000").trim();
+      if (!token) {
+        fail("Provide --token at the root, e.g.: sendmaxx --token sm__xxx --url http://localhost:3000 auth login");
+      }
+      const endpoint = `${url}/api/settings`;
       try {
-        const res = await fetch(`${opts.url}/api/settings`, {
-          headers: { Authorization: `Bearer ${opts.token}` },
+        const res = await fetch(endpoint, {
+          headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) {
-          fail("Token validation failed. Check your token and URL.");
+          const body = await res.text().catch(() => "");
+          fail(`Token validation failed: ${endpoint} returned ${res.status} ${res.statusText}${body ? ` — ${body.slice(0, 200)}` : ""}`);
         }
       } catch (err) {
-        fail(`Cannot reach ${opts.url}: ${(err as Error).message}`);
+        fail(`Cannot reach ${endpoint}: ${(err as Error).message}`);
       }
 
-      writeConfig({ token: opts.token, baseUrl: opts.url });
+      writeConfig({ token, baseUrl: url });
       ok(`Authenticated. Config saved to ~/.sendmaxx/config.json`);
     });
 
