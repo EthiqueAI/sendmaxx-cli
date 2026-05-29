@@ -1,22 +1,31 @@
 import type { Command } from "commander";
 import { api } from "../client.js";
 import { print, fail, ok, type Format } from "../output.js";
+import {
+  addPaginationOptions,
+  extractPaginated,
+  paginationFooter,
+  paginationParams,
+  type PaginationOpts,
+} from "../pagination.js";
 
 export function registerReplies(program: Command): void {
   const replies = program.command("replies").description("Manage replies");
 
-  replies
+  const listCmd = replies
     .command("list")
     .description("List all replies")
-    .option("--tag <tag>", "Filter by tag: interested, meeting_booked, not_now, unsubscribed, unknown")
-    .action(async (opts: { tag?: string }) => {
-      const fmt: Format = program.opts().pretty ? "pretty" : "json";
-      const result = await api<Record<string, unknown>[]>("GET", "/api/replies");
-      if (result.error) return fail(result.error.error);
-      let items = result.data;
-      if (opts.tag) {
-        items = items.filter((r) => r.tag === opts.tag);
-      }
+    .option("--tag <tag>", "Filter by tag: interested, meeting_booked, not_now, unsubscribed, unknown");
+  addPaginationOptions(listCmd);
+  listCmd.action(async (opts: PaginationOpts & { tag?: string }) => {
+    const fmt: Format = program.opts().pretty ? "pretty" : "json";
+    const result = await api<unknown>("GET", "/api/replies", undefined, paginationParams(opts));
+    if (result.error) return fail(result.error.error);
+    let { items, meta } = extractPaginated<Record<string, unknown>>(result.data, "replies");
+    if (opts.tag) items = items.filter((r) => r.tag === opts.tag);
+    if (fmt === "json") {
+      print(meta ? { ...((result.data as object) ?? {}), replies: items } : items, fmt);
+    } else {
       print(items, fmt, {
         head: ["ID", "Contact", "Tag", "Snippet", "Received"],
         rows: (r: Record<string, unknown>) => {
@@ -30,7 +39,10 @@ export function registerReplies(program: Command): void {
           ];
         },
       });
-    });
+      const footer = paginationFooter(meta);
+      if (footer) console.error(footer);
+    }
+  });
 
   replies
     .command("tag <id>")
