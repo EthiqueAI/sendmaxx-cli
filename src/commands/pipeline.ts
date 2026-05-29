@@ -1,6 +1,13 @@
 import type { Command } from "commander";
 import { api } from "../client.js";
 import { print, fail, type Format } from "../output.js";
+import {
+  addPaginationOptions,
+  extractPaginated,
+  paginationFooter,
+  paginationParams,
+  type PaginationOpts,
+} from "../pagination.js";
 
 export function registerPipeline(program: Command): void {
   const pipeline = program.command("pipeline").description("View pipeline data");
@@ -10,11 +17,12 @@ export function registerPipeline(program: Command): void {
     .description("Show pipeline stage counts")
     .action(async () => {
       const fmt: Format = program.opts().pretty ? "pretty" : "json";
-      const result = await api<{ items: Record<string, unknown>[] }>("GET", "/api/pipeline");
+      // status aggregates over the full set — explicitly do NOT paginate
+      const result = await api<unknown>("GET", "/api/pipeline");
       if (result.error) return fail(result.error.error);
-      // Aggregate counts by stage
+      const { items } = extractPaginated<Record<string, unknown>>(result.data, "items");
       const counts: Record<string, number> = {};
-      for (const item of result.data.items) {
+      for (const item of items) {
         const stage = String(item.stage ?? "unknown");
         counts[stage] = (counts[stage] ?? 0) + 1;
       }
@@ -28,18 +36,20 @@ export function registerPipeline(program: Command): void {
       );
     });
 
-  pipeline
+  const contactsCmd = pipeline
     .command("contacts")
     .description("List contacts in the pipeline")
-    .option("--stage <stage>", "Filter by stage")
-    .action(async (opts: { stage?: string }) => {
-      const fmt: Format = program.opts().pretty ? "pretty" : "json";
-      const result = await api<{ items: Record<string, unknown>[] }>("GET", "/api/pipeline");
-      if (result.error) return fail(result.error.error);
-      let items = result.data.items;
-      if (opts.stage) {
-        items = items.filter((i) => i.stage === opts.stage);
-      }
+    .option("--stage <stage>", "Filter by stage");
+  addPaginationOptions(contactsCmd);
+  contactsCmd.action(async (opts: PaginationOpts & { stage?: string }) => {
+    const fmt: Format = program.opts().pretty ? "pretty" : "json";
+    const result = await api<unknown>("GET", "/api/pipeline", undefined, paginationParams(opts));
+    if (result.error) return fail(result.error.error);
+    let { items, meta } = extractPaginated<Record<string, unknown>>(result.data, "items");
+    if (opts.stage) items = items.filter((i) => i.stage === opts.stage);
+    if (fmt === "json") {
+      print(meta ? { ...((result.data as object) ?? {}), items } : items, fmt);
+    } else {
       print(items, fmt, {
         head: ["ID", "Name", "Email", "Company", "Stage", "Campaign"],
         rows: (i: Record<string, unknown>) => [
@@ -51,17 +61,21 @@ export function registerPipeline(program: Command): void {
           String(i.campaignName ?? ""),
         ],
       });
-    });
+      const footer = paginationFooter(meta);
+      if (footer) console.error(footer);
+    }
+  });
 
   pipeline
     .command("export")
     .description("Export pipeline data")
     .option("--format <format>", "Output format: json or csv", "json")
     .action(async (opts: { format: string }) => {
-      const result = await api<{ items: Record<string, unknown>[] }>("GET", "/api/pipeline");
+      // export pulls everything; explicitly do NOT paginate
+      const result = await api<unknown>("GET", "/api/pipeline");
       if (result.error) return fail(result.error.error);
+      const { items } = extractPaginated<Record<string, unknown>>(result.data, "items");
       if (opts.format === "csv") {
-        const items = result.data.items;
         if (items.length === 0) {
           process.stdout.write("\n");
           return;
@@ -72,7 +86,7 @@ export function registerPipeline(program: Command): void {
           process.stdout.write(keys.map((k) => JSON.stringify(String(item[k] ?? ""))).join(",") + "\n");
         }
       } else {
-        process.stdout.write(JSON.stringify(result.data.items, null, 2) + "\n");
+        process.stdout.write(JSON.stringify(items, null, 2) + "\n");
       }
     });
 }
