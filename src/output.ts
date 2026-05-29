@@ -4,7 +4,9 @@ export type Format = "json" | "pretty";
 
 export function print<T>(data: T, format: Format, tableConfig?: {
   head: string[];
-  rows: (item: T extends Array<infer U> ? U : T) => string[];
+  // Permissive: row mappers receive each item; commands narrow with their own
+  // local type assertion (typically `Record<string, unknown>`).
+  rows: (item: never) => string[];
 }): void {
   if (format === "json") {
     process.stdout.write(JSON.stringify(data, null, 2) + "\n");
