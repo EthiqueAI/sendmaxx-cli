@@ -1,5 +1,5 @@
 {
-  "name": "@sendmaxx/cli",
+  "name": "@ethiqueai/cli",
   "version": "0.1.0",
   "description": "SendMaxx CLI for Claude Code and Claude Desktop",
   "license": "MIT",
@@ -8,6 +8,14 @@
   },
   "main": "./dist/index.js",
   "files": ["dist"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EthiqueAI/sendmaxx-cli.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
   "engines": {
     "node": ">=18"
   },
