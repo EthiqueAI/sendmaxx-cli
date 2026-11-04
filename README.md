@@ -74,9 +74,9 @@ For an active dev loop, `npm run dev` runs `tsup` in watch mode so each save reb
 ## Quick start
 
 ```bash
-# 1. Authenticate against your SendMaxx instance.
-#    --token and --url are root-level flags; place them BEFORE the subcommand.
-sendmaxx --token sm_xxx --url http://localhost:3000 auth login
+# 1. Authenticate against your SendMaxx instance. Prompts for an API token
+#    (create one in Settings); input is hidden. --url is a root-level flag.
+sendmaxx --url http://localhost:3000 auth login
 
 # 2. Confirm.
 sendmaxx auth status
@@ -150,7 +150,7 @@ Credentials and base URL are stored at `~/.sendmaxx/config.json`:
 }
 ```
 
-The file is written by `sendmaxx auth login` and removed by `sendmaxx auth logout`. You can edit it by hand if you need to.
+The file is written by `sendmaxx auth login` and removed by `sendmaxx auth logout`. It's created owner-only (`0600`) since it holds your token. You can edit it by hand if you need to.
 
 `auth login` validates the token by hitting `GET /api/settings` before saving — a bad token, unreachable host, or wrong port fails fast rather than getting written.
 
@@ -185,13 +185,14 @@ sendmaxx icps list --include-archived
 Manage CLI authentication.
 
 #### `auth login`
-Validate root `--token` / `--url` against `/api/settings` and save them to `~/.sendmaxx/config.json`.
+Prompt for an API token, validate it against `/api/settings`, and save it with the base URL to `~/.sendmaxx/config.json`.
 
 ```bash
-sendmaxx --token <token> --url <url> auth login
+sendmaxx --url <url> auth login                         # prompts; input is hidden
+sendmaxx --url <url> auth login --with-token < token.txt # non-interactive (scripts, CI)
 ```
 
-`--token` is required at the root level. `--url` defaults to `http://localhost:3000`. On success, prints `✓ Authenticated. Config saved to ~/.sendmaxx/config.json`.
+`--url` defaults to `http://localhost:3000`. Without a terminal to prompt in and without `--with-token`, it exits with an error instead of hanging. The root `--token <token>` flag still works, but it leaves the token in your shell history, so prefer the prompt or `--with-token`. On success, prints `✓ Authenticated. Config saved to ~/.sendmaxx/config.json`.
 
 #### `auth status`
 Print current auth state (authenticated flag, base URL, masked token prefix).

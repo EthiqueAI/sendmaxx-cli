@@ -2,6 +2,8 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { setOverrides } from "./config.js";
 
+declare const __VERSION__: string; // injected by tsup from package.json
+
 const TEAL = "#2E9E91";
 const BANNER = `
 ███████╗███████╗███╗   ██╗██████╗ ███╗   ███╗ █████╗ ██╗  ██╗██╗  ██╗
@@ -29,7 +31,7 @@ const program = new Command();
 program
   .name("sendmaxx")
   .description("SendMaxx CLI — interact with your SendMaxx instance")
-  .version("0.1.0")
+  .version(__VERSION__)
   .option("--token <token>", "API token (overrides stored config)")
   .option("--url <url>", "Base URL (overrides stored config)")
   .option("--pretty", "Output formatted table instead of JSON")
