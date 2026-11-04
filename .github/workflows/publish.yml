@@ -1,10 +1,21 @@
 name: Publish CLI
 
+# Runs on every push to main. Each registry job publishes only if the
+# package.json version isn't already on that registry, so commits that
+# don't bump the version are no-ops. To release: bump the version and merge.
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
+
+# Serialize runs so a main push and a tag push for the same version
+# can't race each other into a duplicate publish.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -34,6 +45,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,13 +56,27 @@ jobs:
           registry-url: "https://npm.pkg.github.com"
           scope: "@ethiqueai"
 
-      - run: npm ci
+      - name: Check if version is already published
+        id: check
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          FOUND=$(npm view "$NAME@$VERSION" version 2>/dev/null || true)
+          if [ "$FOUND" = "$VERSION" ]; then
+            echo "::notice::$NAME@$VERSION already on GitHub Packages — skipping"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - run: npm run build
+      - if: steps.check.outputs.published == 'false'
+        run: npm ci
 
-      - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.check.outputs.published == 'false'
+        run: npm run build
+
+      - if: steps.check.outputs.published == 'false'
+        run: npm publish
 
   publish-npm:
     name: Publish to npm
@@ -67,9 +94,25 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      - run: npm ci
+      - name: Check if version is already published
+        id: check
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          FOUND=$(npm view "$NAME@$VERSION" version 2>/dev/null || true)
+          if [ "$FOUND" = "$VERSION" ]; then
+            echo "::notice::$NAME@$VERSION already on npm — skipping"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - run: npm run build
+      - if: steps.check.outputs.published == 'false'
+        run: npm ci
+
+      - if: steps.check.outputs.published == 'false'
+        run: npm run build
 
       # No token: npm authenticates via the trusted publisher configured on npmjs.com.
-      - run: npm publish --access public
+      - if: steps.check.outputs.published == 'false'
+        run: npm publish --access public
