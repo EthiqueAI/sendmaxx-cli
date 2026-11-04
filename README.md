@@ -74,9 +74,9 @@ For an active dev loop, `npm run dev` runs `tsup` in watch mode so each save reb
 ## Quick start
 
 ```bash
-# 1. Authenticate against your SendMaxx instance. Prompts for an API token
-#    (create one in Settings); input is hidden. --url is a root-level flag.
-sendmaxx --url http://localhost:3000 auth login
+# 1. Authenticate against your SendMaxx instance. Prompts for your SendMaxx URL
+#    and an API token (create one in Settings); token input is hidden.
+sendmaxx auth login
 
 # 2. Confirm.
 sendmaxx auth status
@@ -185,14 +185,15 @@ sendmaxx icps list --include-archived
 Manage CLI authentication.
 
 #### `auth login`
-Prompt for an API token, validate it against `/api/settings`, and save it with the base URL to `~/.sendmaxx/config.json`.
+Prompt for your SendMaxx URL and an API token, validate the token against `/api/settings`, and save both to `~/.sendmaxx/config.json`.
 
 ```bash
-sendmaxx --url <url> auth login                         # prompts; input is hidden
-sendmaxx --url <url> auth login --with-token < token.txt # non-interactive (scripts, CI)
+sendmaxx auth login                                     # prompts for URL and token (token hidden)
+sendmaxx auth login --url <url>                         # skip the URL prompt
+sendmaxx auth login --url <url> --with-token < token.txt # non-interactive (scripts, CI)
 ```
 
-`--url` defaults to `http://localhost:3000`. Without a terminal to prompt in and without `--with-token`, it exits with an error instead of hanging. The root `--token <token>` flag still works, but it leaves the token in your shell history, so prefer the prompt or `--with-token`. On success, prints `✓ Authenticated. Config saved to ~/.sendmaxx/config.json`.
+Without `--url`, the URL prompt offers the saved URL as the default (press Enter to keep it); non-interactive runs reuse the saved URL. There is no built-in default: for local development, pass `--url localhost:3000`. A missing scheme gets `https://` added (`http://` for localhost). Without a terminal to prompt in and without `--with-token`, it exits with an error instead of hanging. The root `--token <token>` flag still works, but it leaves the token in your shell history, so prefer the prompt or `--with-token`. On success, prints `✓ Authenticated. Config saved to ~/.sendmaxx/config.json`.
 
 #### `auth status`
 Print current auth state (authenticated flag, base URL, masked token prefix).
