@@ -37,11 +37,18 @@ By default every command emits JSON on stdout — easy to pipe through `jq`, par
 
 ### Option A — from the registry (recommended for end users)
 
-The package is published to the GitHub Package Registry under `@ethiqueai/sendmaxx-cli`. Configure npm to use the registry for that scope, then install globally:
+The package is published to npm as `@ethiqueai/sendmaxx-cli`. No registry configuration needed:
 
 ```bash
 npm install -g @ethiqueai/sendmaxx-cli
 sendmaxx --version
+```
+
+It's also mirrored to GitHub Packages. To install from there instead, point the scope at GitHub (requires a GitHub token with `read:packages`):
+
+```bash
+npm config set @ethiqueai:registry https://npm.pkg.github.com
+npm install -g @ethiqueai/sendmaxx-cli
 ```
 
 ### Option B — from source (for CLI development)
