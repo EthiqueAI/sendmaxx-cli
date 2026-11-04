@@ -52,5 +52,10 @@ export function getToken(): string {
 }
 
 export function getBaseUrl(): string {
-  return _urlOverride || readConfig().baseUrl || "http://localhost:3000";
+  const url = _urlOverride || readConfig().baseUrl;
+  if (!url) {
+    console.error("No SendMaxx URL configured. Run `sendmaxx auth login` in a terminal, or pass --url <url>.");
+    process.exit(1);
+  }
+  return url;
 }
