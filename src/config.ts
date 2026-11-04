@@ -1,6 +1,6 @@
 import { homedir } from "os";
 import { join } from "path";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from "fs";
 
 type Config = {
   token?: string;
@@ -20,14 +20,17 @@ export function readConfig(): Config {
 }
 
 export function writeConfig(patch: Partial<Config>): void {
-  mkdirSync(CONFIG_DIR, { recursive: true });
+  mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
   const current = readConfig();
   const merged = { ...current, ...patch };
   // Remove undefined keys
   for (const [k, v] of Object.entries(merged)) {
     if (v === undefined) delete (merged as Record<string, unknown>)[k];
   }
-  writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n");
+  // The file holds the API token: owner-only. `mode` only applies when the
+  // file is created, so chmod too in case an older 0644 file already exists.
+  writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2) + "\n", { mode: 0o600 });
+  chmodSync(CONFIG_FILE, 0o600);
 }
 
 // Global overrides — set by index.ts after parsing root opts
@@ -42,7 +45,7 @@ export function setOverrides(token?: string, url?: string): void {
 export function getToken(): string {
   const token = _tokenOverride || readConfig().token;
   if (!token) {
-    console.error("Not authenticated. Run: sendmaxx auth login --token <token>");
+    console.error("Not authenticated. Run `sendmaxx auth login` in a terminal.");
     process.exit(1);
   }
   return token;
