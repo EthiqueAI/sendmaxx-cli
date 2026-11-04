@@ -21,6 +21,8 @@ import { registerReplies } from "./commands/replies.js";
 import { registerAlerts } from "./commands/alerts.js";
 import { registerTags } from "./commands/tags.js";
 import { registerIcps } from "./commands/icps.js";
+import { registerEmails } from "./commands/emails.js";
+import { registerCalls } from "./commands/calls.js";
 
 const program = new Command();
 
@@ -41,11 +43,13 @@ program.addHelpText("before", () => chalk.hex(TEAL)(BANNER) + chalk.hex(TEAL).di
 registerAuth(program);
 registerContacts(program);
 registerCampaigns(program);
+registerEmails(program);
 registerLists(program);
 registerTags(program);
 registerIcps(program);
 registerPipeline(program);
 registerReplies(program);
+registerCalls(program);
 registerAlerts(program);
 
 if (process.argv.length <= 2) {
