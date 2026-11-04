@@ -19,6 +19,7 @@ By default every command emits JSON on stdout — easy to pipe through `jq`, par
   - [`auth`](#auth) — login, status, logout
   - [`contacts`](#contacts) — search, get, add, import, update, tag, archive, delete
   - [`campaigns`](#campaigns) — create, audience, launch/pause/resume, recipients, archive
+  - [`emails`](#emails) — draft, reply, override, send one-off personal emails
   - [`lists`](#lists) — manual, smart, tagged, icp lists
   - [`tags`](#tags) — inspect tags across contacts
   - [`icps`](#icps) — ideal customer profiles
@@ -540,6 +541,120 @@ Per-step and per-variant analytics aggregated across the campaign. Includes the 
 ```bash
 sendmaxx campaigns performance cmp_abc
 ```
+
+---
+
+### `emails`
+
+Individually-written emails to one person — as opposed to `campaigns`, which send one
+template to many. Three kinds share the resource: a standalone note, a reply into an
+existing Gmail thread, and a per-recipient override that replaces a campaign step's
+body for one enrolled contact.
+
+Also registered as `sendmaxx email` (singular).
+
+#### `emails list`
+
+```bash
+sendmaxx emails list --status draft --pretty
+sendmaxx emails list --kind reply --contact ct_abc
+```
+
+| Flag | Description |
+|---|---|
+| `--status <s>` | `draft`, `approved`, `sending`, `sent`, `canceled`, `failed` |
+| `--kind <k>` | `standalone`, `reply`, `campaign_override` |
+| `--contact <id>` | Only emails to this contact |
+| `--include-archived` | Include archived emails |
+| `--archived-only` | Only archived emails |
+| `--limit`, `--offset` | Pagination |
+
+#### `emails get <id>`
+
+`--pretty` renders the subject, recipient, body, and the personalization note behind it.
+
+#### `emails draft`
+
+```bash
+sendmaxx emails draft --contact ct_abc --subject "The auditor portal walkthrough" \
+  --content "$(cat <<'EOF'
+Hey Sarah,
+
+You asked twice yesterday how auditors get in without a full seat — here's the
+2-minute version.
+EOF
+)" --why "Raised auditor access twice on the 8/31 call"
+```
+
+| Flag | Description |
+|---|---|
+| `--contact <id>` | **Required.** Contact id |
+| `--subject <s>` | **Required.** Sent literally — no merge fields |
+| `--content <md>` | Body as markdown. Prefer this with a heredoc |
+| `--content-file <path>` | Body from a file. Wins over `--content` when both are passed |
+| `--why <text>` | Why this email says what it says; shown in review |
+| `--sources <a,b>` | Sources behind the personalization |
+| `--at <iso>` | Schedule for a specific time |
+| `--no-tracking` | Send without the tracking pixel and link rewriting |
+
+Merge fields (`{{first_name}}` etc.) still substitute, but in a personal email they
+are a tell that it isn't personal. Write the actual name.
+
+#### `emails reply`
+
+```bash
+sendmaxx emails reply --contact ct_abc --thread 18f2c9d4e5a6b7c8 --content "..."
+```
+
+Reads the subject and RFC822 threading headers from the thread so the reply lands in
+the conversation rather than starting a new one. Takes the same content, `--why`,
+`--at` and `--no-tracking` flags as `draft`, plus `--thread <gmailThreadId>`
+(required) and an optional `--subject` override. Requires a connected Gmail account.
+
+#### `emails override`
+
+```bash
+sendmaxx campaigns recipients cmp_abc          # get campaignContact ids
+sendmaxx emails override --campaign-contact cc_xyz --step 0 --content "..."
+```
+
+Replaces the shared step body with bespoke text for one recipient. The campaign still
+delivers it, on its own schedule. `--subject` is optional; without it the step's
+subject is used. One override per recipient per step.
+
+Approving is the whole action — there's nothing to send yourself. An override still in
+`draft` when its step comes due is skipped: the template sends and the override is
+marked `canceled`.
+
+#### `emails update <id>`
+
+Takes `--subject`, `--content` / `--content-file`, `--why`, `--at`, and
+`--tracking` / `--no-tracking`. Editing an approved email returns it to `draft` — the
+approval was for the text that was reviewed.
+
+#### `emails send <id>`
+
+```bash
+sendmaxx emails send pe_9kQ --yes           # queue it for the scheduler
+sendmaxx emails send pe_9kQ --yes --now     # send immediately
+```
+
+| Flag | Description |
+|---|---|
+| `--yes` | **Required.** Confirms you are releasing this email to a real person |
+| `--now` | Send immediately instead of waiting for the next scheduler tick |
+
+Without `--now` the email becomes due work the scheduler picks up, inheriting the send
+window, daily cap and 1/sec throttle. `--now` bypasses only the send-hour window — the
+daily cap and throttle still apply.
+
+Sending is refused if the contact is `unsubscribed` or `bounced`; the email is marked
+`canceled` with a reason.
+
+#### `emails cancel <id>` / `archive` / `restore` / `delete`
+
+`cancel` stops an email from ever sending. `archive` is the reversible cleanup verb;
+`delete --yes` is permanent.
 
 ---
 
