@@ -449,6 +449,24 @@ export function registerContacts(program: Command): void {
     });
 
   contacts
+    .command("timeline <id>")
+    .description("Show a contact's activity, oldest first: enrolments, sends, opens, clicks, replies")
+    .action(async (id: string) => {
+      const fmt: Format = program.opts().pretty ? "pretty" : "json";
+      const result = await api<{ contact: unknown; events: Record<string, unknown>[] }>("GET", `/api/contacts/${id}/timeline`);
+      if (result.error) return fail(result.error.error);
+      if (fmt === "json") return print(result.data, fmt);
+      print(result.data.events, fmt, {
+        head: ["When", "Event", "Detail"],
+        rows: (e: Record<string, unknown>) => [
+          e.timestamp ? new Date(Number(e.timestamp)).toLocaleString() : "—",
+          String(e.label ?? e.type ?? ""),
+          String(e.meta ?? ""),
+        ],
+      });
+    });
+
+  contacts
     .command("tags <id>")
     .description("List tags on a contact")
     .action(async (id: string) => {
