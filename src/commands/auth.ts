@@ -3,19 +3,70 @@ import { createInterface } from "node:readline/promises";
 import { readConfig, writeConfig } from "../config.js";
 import { ok, fail } from "../output.js";
 
-/** Trim, drop trailing slashes, and add a scheme if missing (http for localhost, else https). */
+/**
+ * Reduce input to the instance origin: add a scheme if missing (http for
+ * localhost, else https) and drop any path, so a URL pasted from the browser
+ * (e.g. https://host/settings) still points at the instance root.
+ */
 function normalizeUrl(raw: string): string {
-  let url = raw.trim().replace(/\/+$/, "");
+  let url = raw.trim();
   if (!/^https?:\/\//i.test(url)) {
-    const local = /^(localhost|127\.0\.0\.1)(:|$)/i.test(url);
+    const local = /^(localhost|127\.0\.0\.1)(:|\/|$)/i.test(url);
     url = `${local ? "http" : "https"}://${url}`;
   }
+  let parsed: URL;
   try {
-    new URL(url);
+    parsed = new URL(url);
   } catch {
     fail(`Invalid URL: ${raw}`);
   }
-  return url;
+  if (parsed.pathname.replace(/\/+$/, "") || parsed.search) {
+    process.stderr.write(`Using ${parsed.origin} (the instance root; ignoring the rest of the URL)\n`);
+  }
+  return parsed.origin;
+}
+
+type VerifyResult =
+  | { ok: true; email: string; name: string | null }
+  | { ok: false; message: string };
+
+/**
+ * Ask the server who this token belongs to (GET /api/me). Only a 200 with an
+ * identity counts as success: redirects aren't followed (a redirect to the
+ * sign-in page would otherwise come back as a 200 HTML page), and any other
+ * status or response shape is a failure.
+ */
+async function verifyToken(url: string, token: string): Promise<VerifyResult> {
+  const endpoint = `${url}/api/me`;
+  let res: Response;
+  try {
+    res = await fetch(endpoint, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      redirect: "manual",
+    });
+  } catch (err) {
+    return { ok: false, message: `Cannot reach ${endpoint}: ${(err as Error).message}` };
+  }
+  if (res.status === 401 || res.status === 403) {
+    return { ok: false, message: `Token rejected by ${url} (${res.status}). Create a new one at ${url}/settings.` };
+  }
+  if (res.status >= 300 && res.status < 400) {
+    return {
+      ok: false,
+      message: `${endpoint} redirected to ${res.headers.get("location") ?? "another page"} instead of answering. Check that ${url} is your SendMaxx instance.`,
+    };
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
+      message: `${endpoint} returned ${res.status} ${res.statusText}. Check that ${url} is your SendMaxx instance and that it's up to date.`,
+    };
+  }
+  const body = (await res.json().catch(() => null)) as { email?: unknown; name?: unknown } | null;
+  if (!body || typeof body.email !== "string") {
+    return { ok: false, message: `${endpoint} didn't return a SendMaxx identity. Check that ${url} is your SendMaxx instance.` };
+  }
+  return { ok: true, email: body.email, name: typeof body.name === "string" ? body.name : null };
 }
 
 /** Prompt on stderr and read a visible line from the TTY. */
@@ -125,38 +176,36 @@ export function registerAuth(program: Command): void {
       }
       if (!token) fail("No token provided.");
 
-      const endpoint = `${url}/api/settings`;
-      try {
-        const res = await fetch(endpoint, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) {
-          const body = await res.text().catch(() => "");
-          fail(`Token validation failed: ${endpoint} returned ${res.status} ${res.statusText}${body ? ` — ${body.slice(0, 200)}` : ""}`);
-        }
-      } catch (err) {
-        fail(`Cannot reach ${endpoint}: ${(err as Error).message}`);
-      }
+      const result = await verifyToken(url, token);
+      if (!result.ok) fail(result.message);
 
       writeConfig({ token, baseUrl: url });
-      ok(`Authenticated. Config saved to ~/.sendmaxx/config.json`);
+      ok(`Authenticated as ${result.email} on ${url}. Config saved to ~/.sendmaxx/config.json`);
     });
 
   auth
     .command("status")
-    .description("Show current auth status")
-    .action(() => {
-      const { token, baseUrl } = readConfig();
-      if (!token) {
+    .description("Check the saved token against the server and show who it belongs to")
+    .action(async () => {
+      const root = program.opts();
+      const config = readConfig();
+      const token = (root.token as string | undefined)?.trim() || config.token;
+      const rootUrl = (root.url as string | undefined)?.trim();
+      const baseUrl = rootUrl ? normalizeUrl(rootUrl) : config.baseUrl;
+      if (!token || !baseUrl) {
         process.stdout.write(JSON.stringify({ authenticated: false }) + "\n");
         return;
       }
+      const result = await verifyToken(baseUrl, token);
+      const tokenPrefix = token.slice(0, 7) + "...";
       process.stdout.write(
-        JSON.stringify({
-          authenticated: true,
-          baseUrl: baseUrl ?? null,
-          tokenPrefix: token.slice(0, 7) + "...",
-        }, null, 2) + "\n",
+        JSON.stringify(
+          result.ok
+            ? { authenticated: true, baseUrl, user: result.email, tokenPrefix }
+            : { authenticated: false, baseUrl, tokenPrefix, error: result.message },
+          null,
+          2,
+        ) + "\n",
       );
     });
 

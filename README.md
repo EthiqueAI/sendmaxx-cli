@@ -152,7 +152,7 @@ Credentials and base URL are stored at `~/.sendmaxx/config.json`:
 
 The file is written by `sendmaxx auth login` and removed by `sendmaxx auth logout`. It's created owner-only (`0600`) since it holds your token. You can edit it by hand if you need to.
 
-`auth login` validates the token by hitting `GET /api/settings` before saving — a bad token, unreachable host, or wrong port fails fast rather than getting written.
+`auth login` verifies the token with the server (`GET /api/me`) before saving. Only a response that identifies your account counts: a rejected token, a redirect (e.g. to the sign-in page), a non-SendMaxx site, or an unreachable host fails rather than getting written.
 
 ---
 
@@ -185,7 +185,7 @@ sendmaxx icps list --include-archived
 Manage CLI authentication.
 
 #### `auth login`
-Prompt for your SendMaxx URL and an API token, validate the token against `/api/settings`, and save both to `~/.sendmaxx/config.json`.
+Prompt for your SendMaxx URL and an API token, verify the token with the server (`GET /api/me`), and save both to `~/.sendmaxx/config.json`. On success it prints the account the token belongs to. If you paste a URL with a path (e.g. `https://host/settings`), only the instance root is used.
 
 ```bash
 sendmaxx auth login                                     # prompts for URL and token (token hidden)
@@ -196,7 +196,7 @@ sendmaxx auth login --url <url> --with-token < token.txt # non-interactive (scri
 Without `--url`, the URL prompt offers the saved URL as the default (press Enter to keep it); non-interactive runs reuse the saved URL. There is no built-in default: for local development, pass `--url localhost:3000`. A missing scheme gets `https://` added (`http://` for localhost). Without a terminal to prompt in and without `--with-token`, it exits with an error instead of hanging. The root `--token <token>` flag still works, but it leaves the token in your shell history, so prefer the prompt or `--with-token`. On success, prints `✓ Authenticated. Config saved to ~/.sendmaxx/config.json`.
 
 #### `auth status`
-Print current auth state (authenticated flag, base URL, masked token prefix).
+Check the saved token against the server and print the result: `authenticated`, base URL, the account email (`user`), and the masked token prefix. If the server rejects the token or can't be reached, `authenticated` is `false` and `error` says why.
 
 ```bash
 sendmaxx auth status
