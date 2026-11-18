@@ -797,7 +797,18 @@ sendmaxx tags list --pretty
 
 Manage ideal customer profiles. Also available as `icp` (singular alias).
 
-ICPs are server-first: `sendmaxx icps get <slug>` is the source of truth. Any local markdown file is a draft, not authoritative. Once an ICP exists, an auto-spawned list of `type: icp` becomes the execution vehicle — discovery adds prospects to it, campaigns target it.
+ICPs live on the server, and the CLI keeps a local copy of each active ICP in sync at `~/.sendmaxx/icps/<slug>.md` (the markdown `content`, nothing else). Once an ICP exists, an auto-spawned list of `type: icp` becomes the execution vehicle — discovery adds prospects to it, campaigns target it.
+
+**Local copies.** Every `icps` command syncs the ICPs it touches:
+
+| Command | Local effect |
+|---|---|
+| `create`, `update --content` | Writes the new content to `<slug>.md`. If the file held different unpushed edits, they're kept as `<slug>.local-edits.md`. |
+| `get`, `list`, `update` (other fields) | Pulls server changes and pushes edits you made to `<slug>.md`. An unpaginated `list` also removes copies of ICPs that are gone from the server. |
+| `archive`, `delete` | Removes `<slug>.md`. Unpushed edits are kept as `<slug>.local-edits.md`. |
+| `restore` | Pulls `<slug>.md` back. |
+
+Sync compares both sides against the content at the last sync. If only one side changed, that side wins. If both changed, nothing is overwritten: the server version is saved as `<slug>.server.md` and the command reports a conflict, which you resolve with `icps sync <slug> --prefer local|server`. Deleting a local file never deletes the ICP; the next sync pulls it back. Bookkeeping lives in `~/.sendmaxx/icps/.sync-state.json`. If the local directory isn't writable, commands warn and carry on.
 
 #### `icps list`
 List ICPs. Supports pagination and archive filtering.
@@ -864,6 +875,18 @@ sendmaxx icps archive vertical-saas --keep-list   # archive only the ICP doc
 ```
 
 Restore is symmetric: restoring an ICP also un-archives its linked list if archived alongside.
+
+#### `icps sync [slug]`
+Two-way sync between the server and `~/.sendmaxx/icps/` — every active ICP, or just one. Prints a JSON summary of what was pulled, pushed, removed, or left in conflict, and exits `1` if anything conflicted or failed.
+
+```bash
+sendmaxx icps sync                              # everything
+sendmaxx icps sync vertical-saas                # one ICP
+sendmaxx icps sync vertical-saas --prefer local # resolve a conflict with your local edits
+sendmaxx icps sync vertical-saas --prefer server # …or with the server version (local edits kept as .local-edits.md)
+```
+
+A file in `~/.sendmaxx/icps/` that was never synced and has no ICP on the server is reported as `local-only` and left alone. Create it with `icps create --content-file`.
 
 #### `icps restore <slug>`
 Restore an archived ICP. Also restores its linked list if it was archived alongside.
