@@ -7,7 +7,7 @@ type Config = {
   baseUrl?: string;
 };
 
-const CONFIG_DIR = join(homedir(), ".sendmaxx");
+export const CONFIG_DIR = join(homedir(), ".sendmaxx");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 export function readConfig(): Config {

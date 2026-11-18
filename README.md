@@ -152,7 +152,7 @@ Credentials and base URL are stored at `~/.sendmaxx/config.json`:
 
 The file is written by `sendmaxx auth login` and removed by `sendmaxx auth logout`. It's created owner-only (`0600`) since it holds your token. You can edit it by hand if you need to.
 
-`auth login` validates the token by hitting `GET /api/settings` before saving — a bad token, unreachable host, or wrong port fails fast rather than getting written.
+`auth login` verifies the token with the server (`GET /api/me`) before saving. Only a response that identifies your account counts: a rejected token, a redirect (e.g. to the sign-in page), a non-SendMaxx site, or an unreachable host fails rather than getting written.
 
 ---
 
@@ -185,7 +185,7 @@ sendmaxx icps list --include-archived
 Manage CLI authentication.
 
 #### `auth login`
-Prompt for your SendMaxx URL and an API token, validate the token against `/api/settings`, and save both to `~/.sendmaxx/config.json`.
+Prompt for your SendMaxx URL and an API token, verify the token with the server (`GET /api/me`), and save both to `~/.sendmaxx/config.json`. On success it prints the account the token belongs to. If you paste a URL with a path (e.g. `https://host/settings`), only the instance root is used.
 
 ```bash
 sendmaxx auth login                                     # prompts for URL and token (token hidden)
@@ -196,7 +196,7 @@ sendmaxx auth login --url <url> --with-token < token.txt # non-interactive (scri
 Without `--url`, the URL prompt offers the saved URL as the default (press Enter to keep it); non-interactive runs reuse the saved URL. There is no built-in default: for local development, pass `--url localhost:3000`. A missing scheme gets `https://` added (`http://` for localhost). Without a terminal to prompt in and without `--with-token`, it exits with an error instead of hanging. The root `--token <token>` flag still works, but it leaves the token in your shell history, so prefer the prompt or `--with-token`. On success, prints `✓ Authenticated. Config saved to ~/.sendmaxx/config.json`.
 
 #### `auth status`
-Print current auth state (authenticated flag, base URL, masked token prefix).
+Check the saved token against the server and print the result: `authenticated`, base URL, the account email (`user`), and the masked token prefix. If the server rejects the token or can't be reached, `authenticated` is `false` and `error` says why.
 
 ```bash
 sendmaxx auth status
@@ -797,7 +797,18 @@ sendmaxx tags list --pretty
 
 Manage ideal customer profiles. Also available as `icp` (singular alias).
 
-ICPs are server-first: `sendmaxx icps get <slug>` is the source of truth. Any local markdown file is a draft, not authoritative. Once an ICP exists, an auto-spawned list of `type: icp` becomes the execution vehicle — discovery adds prospects to it, campaigns target it.
+ICPs live on the server, and the CLI keeps a local copy of each active ICP in sync at `~/.sendmaxx/icps/<slug>.md` (the markdown `content`, nothing else). Once an ICP exists, an auto-spawned list of `type: icp` becomes the execution vehicle — discovery adds prospects to it, campaigns target it.
+
+**Local copies.** Every `icps` command syncs the ICPs it touches:
+
+| Command | Local effect |
+|---|---|
+| `create`, `update --content` | Writes the new content to `<slug>.md`. If the file held different unpushed edits, they're kept as `<slug>.local-edits.md`. |
+| `get`, `list`, `update` (other fields) | Pulls server changes and pushes edits you made to `<slug>.md`. An unpaginated `list` also removes copies of ICPs that are gone from the server. |
+| `archive`, `delete` | Removes `<slug>.md`. Unpushed edits are kept as `<slug>.local-edits.md`. |
+| `restore` | Pulls `<slug>.md` back. |
+
+Sync compares both sides against the content at the last sync. If only one side changed, that side wins. If both changed, nothing is overwritten: the server version is saved as `<slug>.server.md` and the command reports a conflict, which you resolve with `icps sync <slug> --prefer local|server`. Deleting a local file never deletes the ICP; the next sync pulls it back. Bookkeeping lives in `~/.sendmaxx/icps/.sync-state.json`. If the local directory isn't writable, commands warn and carry on.
 
 #### `icps list`
 List ICPs. Supports pagination and archive filtering.
@@ -864,6 +875,18 @@ sendmaxx icps archive vertical-saas --keep-list   # archive only the ICP doc
 ```
 
 Restore is symmetric: restoring an ICP also un-archives its linked list if archived alongside.
+
+#### `icps sync [slug]`
+Two-way sync between the server and `~/.sendmaxx/icps/` — every active ICP, or just one. Prints a JSON summary of what was pulled, pushed, removed, or left in conflict, and exits `1` if anything conflicted or failed.
+
+```bash
+sendmaxx icps sync                              # everything
+sendmaxx icps sync vertical-saas                # one ICP
+sendmaxx icps sync vertical-saas --prefer local # resolve a conflict with your local edits
+sendmaxx icps sync vertical-saas --prefer server # …or with the server version (local edits kept as .local-edits.md)
+```
+
+A file in `~/.sendmaxx/icps/` that was never synced and has no ICP on the server is reported as `local-only` and left alone. Create it with `icps create --content-file`.
 
 #### `icps restore <slug>`
 Restore an archived ICP. Also restores its linked list if it was archived alongside.
