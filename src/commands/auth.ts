@@ -27,7 +27,8 @@ function normalizeUrl(raw: string): string {
 }
 
 type VerifyResult =
-  | { ok: true; email: string; name: string | null }
+  /** orgMode is null when the server predates reporting it. */
+  | { ok: true; email: string; name: string | null; orgMode: boolean | null }
   | { ok: false; message: string };
 
 /**
@@ -62,11 +63,28 @@ async function verifyToken(url: string, token: string): Promise<VerifyResult> {
       message: `${endpoint} returned ${res.status} ${res.statusText}. Check that ${url} is your SendMaxx instance and that it's up to date.`,
     };
   }
-  const body = (await res.json().catch(() => null)) as { email?: unknown; name?: unknown } | null;
+  const body = (await res.json().catch(() => null)) as {
+    email?: unknown;
+    name?: unknown;
+    orgMode?: unknown;
+  } | null;
   if (!body || typeof body.email !== "string") {
     return { ok: false, message: `${endpoint} didn't return a SendMaxx identity. Check that ${url} is your SendMaxx instance.` };
   }
-  return { ok: true, email: body.email, name: typeof body.name === "string" ? body.name : null };
+  return {
+    ok: true,
+    email: body.email,
+    name: typeof body.name === "string" ? body.name : null,
+    orgMode: typeof body.orgMode === "boolean" ? body.orgMode : null,
+  };
+}
+
+/** How the workspace's data visibility reads in a one-line message. */
+function describeMode(orgMode: boolean | null): string {
+  if (orgMode === null) return "";
+  return orgMode
+    ? " Workspace is in org mode: you see everyone's records."
+    : " Workspace is in user mode: you see only your own records.";
 }
 
 /** Prompt on stderr and read a visible line from the TTY. */
@@ -180,7 +198,9 @@ export function registerAuth(program: Command): void {
       if (!result.ok) fail(result.message);
 
       writeConfig({ token, baseUrl: url });
-      ok(`Authenticated as ${result.email} on ${url}. Config saved to ~/.sendmaxx/config.json`);
+      ok(
+        `Authenticated as ${result.email} on ${url}.${describeMode(result.orgMode)} Config saved to ~/.sendmaxx/config.json`,
+      );
     });
 
   auth
@@ -201,7 +221,13 @@ export function registerAuth(program: Command): void {
       process.stdout.write(
         JSON.stringify(
           result.ok
-            ? { authenticated: true, baseUrl, user: result.email, tokenPrefix }
+            ? {
+                authenticated: true,
+                baseUrl,
+                user: result.email,
+                ...(result.orgMode === null ? {} : { orgMode: result.orgMode }),
+                tokenPrefix,
+              }
             : { authenticated: false, baseUrl, tokenPrefix, error: result.message },
           null,
           2,
