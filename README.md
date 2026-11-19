@@ -288,11 +288,18 @@ sendmaxx contacts import --file leads.json --format json
 | `state` | | US 2-letter code is conventional but not enforced. |
 | `county` | | |
 | `notes` | | Free text. |
+| `confidenceScore` | | Whole number 0–10. |
+| `confidenceTier` | | `low`, `medium` or `high`. Derived from the score when omitted (7+ high, 4–6 medium, 0–3 low). |
+| `confidenceReasoning` | | Why the score: which signals matched, which didn't. Shown in the web app next to the score. |
+| `sources` | | Provider names or URLs: a JSON array, or comma-separated text in a CSV cell. |
+| `enrichedAt` | | ISO date or unix milliseconds. Defaults to now when `sources` is given. |
+
+Existing emails are skipped, never overwritten — use `contacts update` to change a contact you already have. A row whose score fields don't validate is skipped and listed in `errors`; nothing is half-imported.
 
 **CSV format:**
 - First row is the header. Cells may be quoted; embedded commas and `""`-escaped quotes are handled. UTF-8 BOM is stripped.
-- Common header variants are auto-mapped: `Email Address`, `email_address`, `E-mail` → `email`; `First Name`, `first_name`, `Given Name`, `fname` → `firstName`; `Surname`, `Family Name` → `lastName`; `Job Title`, `Role`, `Position` → `title`; `Organization`, `Company Name`, `Org`, `Employer` → `company`; `Phone Number`, `Mobile`, `Tel` → `phone`; `Province`, `Region` → `state`; `Note`, `Comments` → `notes`.
-- If a column doesn't auto-map, pass `--mapping '{"<exact header text>":"<canonical field>"}'`. The canonical field must be one of the nine fields above.
+- Common header variants are auto-mapped: `Email Address`, `email_address`, `E-mail` → `email`; `First Name`, `first_name`, `Given Name`, `fname` → `firstName`; `Surname`, `Family Name` → `lastName`; `Job Title`, `Role`, `Position` → `title`; `Organization`, `Company Name`, `Org`, `Employer` → `company`; `Phone Number`, `Mobile`, `Tel` → `phone`; `Province`, `Region` → `state`; `Note`, `Comments` → `notes`; `Confidence`, `Confidence Score` → `confidenceScore`; `Confidence Tier`, `Confidence Reasoning`, `Sources`, `Enriched At` → their fields.
+- If a column doesn't auto-map, pass `--mapping '{"<exact header text>":"<canonical field>"}'`. The canonical field must be one of the fields above.
 
 **JSON format:** either a top-level array `[{...}, {...}]` or `{"rows":[{...}, {...}]}`. Use canonical field names directly.
 
@@ -475,24 +482,26 @@ sendmaxx campaigns delete cmp_abc --yes
 Prefer `campaigns archive` — archived campaigns retain analytics, deleted ones don't.
 
 #### `campaigns launch <id>`
-Set status to `active` and enroll the audience for immediate send.
+Start sending to everyone in the audience who hasn't started yet, and set the campaign `active`.
 
 ```bash
 sendmaxx campaigns launch cmp_abc                           # uses existing audience
 sendmaxx campaigns launch cmp_abc --contacts ct_1,ct_2,ct_3 # enroll these too
 ```
 
-Returns `{ ok: true, enrolled: <n> }`. The server rejects launches with no steps or empty audience.
+Returns `{ ok: true, started: <n>, audience: <n> }` (`enrolled` repeats `started` for older CLIs). Launch only ever starts recipients who haven't started: anyone in progress, finished, replied, bounced or unsubscribed is left exactly where they are. So launching a running or finished campaign again is safe — it starts only contacts added since, and is refused when there are none.
+
+Refused (409) while the campaign is paused (use `resume`) or archived (use `restore`); refused (400) with no steps or an empty audience.
 
 #### `campaigns pause <id>`
-Stop the scheduler from picking up new sends for this campaign. Existing enrollments keep their state.
+Stop sending. Nothing goes out for this campaign until it's resumed — including emails that are already due, and an email waiting its turn in the current scheduler run. Recipients keep their place. Pausing a paused campaign is a no-op; pausing a draft or finished campaign is refused.
 
 ```bash
 sendmaxx campaigns pause cmp_abc
 ```
 
 #### `campaigns resume <id>`
-Move back to `active` from `paused`.
+Move a paused campaign back to `active`; recipients carry on where they stopped, and anything that fell due during the pause goes out (within the send window and daily cap). Only the campaign's creator can resume, like launch. Refused for drafts (launch instead), finished campaigns, and archived ones (restore first). If everyone finished while it was paused, it completes instead.
 
 ```bash
 sendmaxx campaigns resume cmp_abc
