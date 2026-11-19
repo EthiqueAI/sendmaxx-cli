@@ -13,11 +13,17 @@ import {
 
 // --- import helpers -------------------------------------------------------
 
-const ALLOWED_FIELDS = ["email", "firstName", "lastName", "company", "title", "phone", "state", "county", "notes"] as const;
-type ImportRow = Partial<Record<(typeof ALLOWED_FIELDS)[number], string>>;
+// Plain contact fields, then Claude's score and enrichment fields. The server
+// validates the second group (score 0-10, tier low|medium|high, sources list,
+// enrichedAt as ISO date or unix ms) and reports any row it rejects.
+const TEXT_FIELDS = ["email", "firstName", "lastName", "company", "title", "phone", "state", "county", "notes"] as const;
+const ENRICHMENT_FIELDS = ["confidenceScore", "confidenceTier", "confidenceReasoning", "sources", "enrichedAt"] as const;
+const ALLOWED_FIELDS = [...TEXT_FIELDS, ...ENRICHMENT_FIELDS] as const;
+type Field = (typeof ALLOWED_FIELDS)[number];
+type ImportRow = Partial<Record<Field, unknown>>;
 
 // Maps a normalized header (lowercase, alphanumeric only) to a canonical field.
-const HEADER_ALIASES: Record<string, (typeof ALLOWED_FIELDS)[number]> = {
+const HEADER_ALIASES: Record<string, Field> = {
   email: "email",
   emailaddress: "email",
   firstname: "firstName",
@@ -47,6 +53,12 @@ const HEADER_ALIASES: Record<string, (typeof ALLOWED_FIELDS)[number]> = {
   notes: "notes",
   note: "notes",
   comments: "notes",
+  confidence: "confidenceScore",
+  confidencescore: "confidenceScore",
+  confidencetier: "confidenceTier",
+  confidencereasoning: "confidenceReasoning",
+  sources: "sources",
+  enrichedat: "enrichedAt",
 };
 
 function normalizeHeader(h: string): string {
@@ -103,7 +115,7 @@ function mapCsvToRows(csvText: string, userMapping?: Record<string, string>): Im
     if (userMapping) {
       const direct = userMapping[h] ?? userMapping[h.trim()];
       if (direct) {
-        if (!ALLOWED_FIELDS.includes(direct as (typeof ALLOWED_FIELDS)[number])) {
+        if (!ALLOWED_FIELDS.includes(direct as Field)) {
           fail(`Mapping target "${direct}" for column "${h}" is not a valid field. Allowed: ${ALLOWED_FIELDS.join(", ")}.`);
         }
         return direct as keyof ImportRow;
@@ -134,9 +146,14 @@ function loadJsonRows(jsonText: string): ImportRow[] {
   return arr.map((r) => {
     const row = r as Record<string, unknown>;
     const out: ImportRow = {};
-    for (const k of ALLOWED_FIELDS) {
+    for (const k of TEXT_FIELDS) {
       const v = row[k];
-      if (typeof v === "string" && v.trim()) out[k] = v.trim();
+      if (typeof v === "number") out[k] = String(v); // e.g. a phone stored as a number
+      else if (typeof v === "string" && v.trim()) out[k] = v.trim();
+    }
+    // Typed as sent (numbers, source arrays); the server validates them.
+    for (const k of ENRICHMENT_FIELDS) {
+      if (row[k] !== undefined && row[k] !== null && row[k] !== "") out[k] = row[k];
     }
     return out;
   });
@@ -236,7 +253,9 @@ export function registerContacts(program: Command): void {
 
   contacts
     .command("add")
-    .description("Add a contact (--json) or bulk import (--file)")
+    .description(
+      "Add a contact (--json) or a small batch (--file). Accepts the plain fields plus confidenceScore, confidenceTier, confidenceReasoning, sources and enrichedAt.",
+    )
     .option("--json <json>", "Contact as JSON string")
     .option("--file <path>", "Path to JSON file (single object or array)")
     .action(async (opts: { json?: string; file?: string }) => {
@@ -276,10 +295,17 @@ export function registerContacts(program: Command): void {
 
   Allowed fields (other columns are ignored):
     email (required for each row), firstName, lastName, company, title, phone, state, county, notes
+    confidenceScore (whole number 0-10), confidenceTier (low|medium|high; derived from the
+      score when omitted), confidenceReasoning, sources (list of provider names or URLs),
+      enrichedAt (ISO date or unix ms; defaults to now when sources are given)
+
+  Existing emails are skipped, never overwritten. A row whose score fields don't
+  validate is skipped and listed in "errors".
 
   CSV: first row is the header. Common column-name variants are auto-mapped
        (e.g. "Email Address" → email, "First Name" → firstName, "Job Title" → title,
-        "organization" → company, "phone_number" → phone). Use --mapping to override.
+        "organization" → company, "phone_number" → phone, "Confidence" → confidenceScore).
+        Quote a sources cell that lists several: "apollo, hunter". Use --mapping to override.
 
   JSON: an array of contact objects, or { "rows": [ {...}, {...} ] }.
 
@@ -312,7 +338,7 @@ export function registerContacts(program: Command): void {
       }
 
       const rows = format === "csv" ? mapCsvToRows(text, userMapping) : loadJsonRows(text);
-      const withEmail = rows.filter((r) => r.email && r.email.includes("@"));
+      const withEmail = rows.filter((r) => typeof r.email === "string" && r.email.includes("@"));
       const dropped = rows.length - withEmail.length;
 
       if (opts.dryRun) {
@@ -334,7 +360,12 @@ export function registerContacts(program: Command): void {
         { rows: withEmail },
       );
       if (result.error) return fail(result.error.error);
-      ok(`Imported ${result.data.imported}, skipped ${result.data.skipped}${dropped > 0 ? `, dropped ${dropped} without email` : ""}`);
+      const rejected = result.data.errors?.length ?? 0;
+      ok(
+        `Imported ${result.data.imported}, skipped ${result.data.skipped}` +
+          (dropped > 0 ? `, dropped ${dropped} without email` : "") +
+          (rejected > 0 ? `; ${rejected} rejected, see "errors"` : ""),
+      );
       print(result.data, fmt);
     });
 
@@ -359,7 +390,9 @@ export function registerContacts(program: Command): void {
 
   contacts
     .command("update <id>")
-    .description("Update a contact's fields")
+    .description(
+      "Update a contact's fields. Only the fields you send change. Scoring: confidenceScore (0-10), confidenceTier (low|medium|high), confidenceReasoning, sources, enrichedAt; send null to clear one.",
+    )
     .requiredOption("--json <json>", "Fields to update as JSON string")
     .action(async (id: string, opts: { json: string }) => {
       const fmt: Format = program.opts().pretty ? "pretty" : "json";

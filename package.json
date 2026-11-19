@@ -1,6 +1,6 @@
 {
   "name": "@ethiqueai/sendmaxx-cli",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "SendMaxx CLI for Claude Code and Claude Desktop",
   "license": "MIT",
   "bin": {
