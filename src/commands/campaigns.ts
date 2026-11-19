@@ -292,35 +292,48 @@ export function registerCampaigns(program: Command): void {
 
   campaigns
     .command("launch <id>")
-    .description("Launch a campaign. Sets status=active and enrolls audience for immediate send.")
+    .description(
+      "Start sending to everyone in the audience who hasn't started yet. Recipients already in progress or finished are never emailed again, so launching a running or finished campaign only starts contacts added since. Refused while paused (use resume) or archived.",
+    )
     .option("--contacts <ids>", "Comma-separated contact IDs to enroll at launch (in addition to existing audience)")
     .action(async (id: string, opts: { contacts?: string }) => {
       const body: Record<string, unknown> = {};
       if (opts.contacts) body.contactIds = splitCsv(opts.contacts);
-      const result = await api<{ ok: boolean; enrolled: number }>("POST", `/api/campaigns/${id}/launch`, body);
+      const result = await api<{ ok: boolean; started?: number; audience?: number; enrolled: number }>(
+        "POST",
+        `/api/campaigns/${id}/launch`,
+        body,
+      );
       if (result.error) return fail(result.error.error);
-      ok(`Launched. ${result.data.enrolled} contact(s) enrolled.`);
+      const started = result.data.started ?? result.data.enrolled;
+      const audience = result.data.audience != null ? ` (audience ${result.data.audience})` : "";
+      ok(`Launched. Sending to ${started} new recipient(s)${audience}.`);
       process.stdout.write(JSON.stringify(result.data) + "\n");
     });
 
   campaigns
     .command("pause <id>")
-    .description("Pause a campaign (status=paused). No new sends until resumed.")
+    .description(
+      "Pause a running campaign. Nothing is sent for it until you resume, including emails already due; recipients keep their place.",
+    )
     .action(async (id: string) => {
-      const result = await api<unknown>("POST", `/api/campaigns/${id}/pause`);
+      const result = await api<{ ok: boolean; status?: string; changed?: boolean }>("POST", `/api/campaigns/${id}/pause`);
       if (result.error) return fail(result.error.error);
-      ok(`Paused ${id}`);
-      process.stdout.write(JSON.stringify({ ok: true }) + "\n");
+      ok(result.data.changed === false ? `Already paused: ${id}` : `Paused ${id}`);
+      process.stdout.write(JSON.stringify(result.data) + "\n");
     });
 
   campaigns
     .command("resume <id>")
-    .description("Resume a paused campaign (status=active).")
+    .description(
+      "Resume a paused campaign; recipients carry on where they stopped. Creator-only, like launch. Refused for archived campaigns (restore first).",
+    )
     .action(async (id: string) => {
-      const result = await api<unknown>("POST", `/api/campaigns/${id}/resume`);
+      const result = await api<{ ok: boolean; status?: string; changed?: boolean }>("POST", `/api/campaigns/${id}/resume`);
       if (result.error) return fail(result.error.error);
-      ok(`Resumed ${id}`);
-      process.stdout.write(JSON.stringify({ ok: true }) + "\n");
+      if (result.data.status === "completed") ok(`Everyone in ${id} had already finished, so it's now completed.`);
+      else ok(result.data.changed === false ? `Already active: ${id}` : `Resumed ${id}`);
+      process.stdout.write(JSON.stringify(result.data) + "\n");
     });
 
   // --- audience ---------------------------------------------------------
